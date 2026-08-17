@@ -1,0 +1,6 @@
+fastapi==0.141.1
+uvicorn==0.52.3
+feedparser==6.0.12
+supabase==2.27.0
+python-dotenv==1.1.1
+pydantic==2.13.4
