@@ -31,4 +31,50 @@ SOURCES = {
             "https://www.indiatoday.in/rss/1206584"
         ]
     },
+
+    "hindu": {
+        "name": "The Hindu",
+        "feeds": [
+            "https://www.thehindu.com/news/cities/feeder/default.rss",
+            "https://www.thehindu.com/news/states/feeder/default.rss",
+            "https://www.thehindu.com/news/national/feeder/default.rss",
+            "https://www.thehindu.com/news/international/feeder/default.rss"
+        ]
+    },
+
+    "toi": {
+        "name": "The Times of India",
+        "feeds": [
+            "http://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+            "http://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms",
+            "http://timesofindia.indiatimes.com/rssfeeds/296589292.cms",
+            "http://timesofindia.indiatimes.com/rssfeeds/1898055.cms"
+        ]
+    },
+
+    "print": {
+        "name": "The Print",
+        "feeds": [
+            "https://rss.app/feeds/Dg2qlcdCsuGZKBBs.xml"
+        ]
+    },
+
+    "news18": {
+        "name": "News18",
+        "feeds": [
+            "https://www.news18.com/commonfeeds/v1/eng/rss/viral.xml",
+            "https://www.news18.com/commonfeeds/v1/eng/rss/india.xml",
+            "https://www.news18.com/commonfeeds/v1/eng/rss/world.xml"
+        ]
+    },
+
+    "firstpost": {
+        "name": "FirstPost",
+        "feeds": [
+            "https://www.firstpost.com/commonfeeds/v1/mfp/rss/india.xml",
+            "https://www.firstpost.com/commonfeeds/v1/mfp/rss/world.xml",
+            "https://www.firstpost.com/commonfeeds/v1/mfp/rss/entertainment.xml",
+            "https://www.firstpost.com/commonfeeds/v1/mfp/rss/health.xml"
+        ]
+    }
 }
