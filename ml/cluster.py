@@ -1,16 +1,37 @@
-import json
+import os
 import re
+import hdbscan
 import numpy as np
 import pandas as pd
-import hdbscan
 
+from pathlib import Path
+from datetime import datetime 
+from dotenv import load_dotenv
+from supabase import create_client
+from pydantic import BaseModel, HttpUrl
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-DATASET_PATH = "./dataset/news.jsonl"
+load_dotenv()
+
+class Article(BaseModel):
+    id: str | None
+    title: str
+    url: HttpUrl
+    description: str | None = None
+    author: str | None = None
+    published_at: datetime | None = None
+    source: str
+    cluster: str | None
+
+class Event(BaseModel):
+    id: str | None
+    title: str
+    summary: str | None = None
+    # created_at: datetime | None = None
+    # updated_at: datetime | None = None
+
 MODEL_NAME = "all-MiniLM-L6-v2"
-MAX_ARTICLES = None
-EVENT_TEXT_WORDS = 900
 
 HDBSCAN_MIN_CLUSTER_SIZE = 2
 HDBSCAN_MIN_SAMPLES = 1
@@ -20,210 +41,238 @@ TIME_WEIGHT = 0.10
 
 TIME_DECAY_DAYS = 30
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-print("\nLoading dataset...")
-def load_dataset(path):
-    if path.endswith(".jsonl"):
-        records = []
-        with open(path, "r", encoding="utf-8") as file:
-            for line in file:
-                line = line.strip()
-                if line:
-                    records.append(json.loads(line))
-        return records
-    else:
-        with open(path, "r", encoding="utf-8") as file:
-            return json.load(file)
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError(
+        "SUPABASE_URL and SUPABASE_KEY environment variables are required."
+    )
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+model = SentenceTransformer(MODEL_NAME)
 
 
-data = load_dataset(DATASET_PATH)
-df = pd.DataFrame(data)
+def get_articles():
+    articles = []
+    page_size = 1000
+    offset = 0
 
-print("Articles loaded:", len(df))
+    while True:
+        response = (
+            supabase
+            .table("articles")
+            .select("title, published_at, source")
+            .range(
+                offset,
+                offset + page_size - 1
+            )
+            .execute()
+        )
 
+        batch = response.data
+        if not batch:
+            break
 
-
-required_columns = ["input_text", "date", "source"]
-for column in required_columns:
-    if column not in df.columns:
-        raise ValueError( f"Dataset is missing column: {column}" )
-
-
-df = df.dropna(subset=["input_text", "date"])
-df["input_text"] = (df["input_text"].astype(str))
-df["date"] = pd.to_datetime(df["date"], errors="coerce")
-
-df = df.dropna(subset=["date"])
-df = df[df["input_text"].str.strip() != ""]
-
-df = df.reset_index(drop=True)
-
-
-
-if MAX_ARTICLES is not None:
-    df = df.head(MAX_ARTICLES).copy()
-    df = df.reset_index(drop=True)
-
-print("Articles being processed:", len(df))
-
+        articles.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return articles
 
 
 def clean_text(text):
-    text = re.sub( r"<[^>]+>", " ", text)
-    text = re.sub( r"https?://\S+|www\.\S+", " ", text)
-    text = re.sub( r"\s+", " ", text)
+    text = re.sub(r"<[^>]+>", " ", str(text))
+    text = re.sub(r"https?://\S+|www\.\S+", " ", text)
+    text = re.sub(r"\s+", " ", text)
 
+    print("Text Cleaned")
     return text.strip()
 
-df["clean_text"] = (df["input_text"].apply(clean_text))
 
+def cluster_articles(articles):
+    if not articles:
+        return []
 
+    df = pd.DataFrame(articles)
 
-before = len(df)
-df = df.drop_duplicates(subset=["clean_text"])
-df = df.reset_index(drop=True)
+    required_columns = [
+        "title",
+        "published_at",
+        "source"
+    ]
 
-print("Duplicate articles removed:", before - len(df))
+    for column in required_columns:
+        if column not in df.columns:
+            raise ValueError(
+                f"Article data is missing column: {column}"
+            )
 
+    print("Columns perfecto!!")
+    df = df.dropna(subset=["title", "published_at"])
 
-
-def get_event_text(text, word_limit=900):
-    words = text.split()
-    return " ".join(words[:word_limit])
-
-
-print("\nLoading Sentence Transformer...")
-model = SentenceTransformer(MODEL_NAME)
-
-print("Model loaded.")
-print("\nGenerating article embeddings...")
-
-article_embeddings = []
-for index, row in df.iterrows():
-    text = row["clean_text"]
-    event_text = get_event_text(text, EVENT_TEXT_WORDS)
-    article_embedding = model.encode(event_text,show_progress_bar=False)
-
-    article_embeddings.append(article_embedding)
-
-    if (index + 1) % 50 == 0:
-        print(f"Processed {index + 1}/{len(df)}")
-
-
-article_embeddings = np.array(article_embeddings)
-
-print("\nEmbedding shape:", article_embeddings.shape)
-print("\nCalculating semantic similarity...")
-semantic_similarity = cosine_similarity(article_embeddings)
-
-print("\n")
-print("=" * 70)
-print("CALCULATING TEMPORAL SIMILARITY")
-print("=" * 70)
-
-dates = df["date"].values
-number_of_articles = len(df)
-temporal_similarity = np.zeros((
-        number_of_articles,
-        number_of_articles
+    df["title"] = (
+        df["title"]
+        .astype(str)
+        .apply(clean_text)
+        .str.strip()
     )
-)
 
-for i in range(number_of_articles):
-    for j in range(number_of_articles):
-        days_difference = abs((dates[i] - dates[j])
-            .astype(
-                "timedelta64[D]")
-            .astype(int)
+    df["published_at"] = pd.to_datetime(
+        df["published_at"],
+        errors="coerce"
+    )
+
+    df = df.dropna(
+        subset=["published_at"]
+    )
+
+    df = df[df["title"].str.strip() != ""]
+    df = df.reset_index(drop=True)
+    df = df.drop_duplicates(subset=["title"])
+    df = df.reset_index(drop=True)
+
+    if len(df) == 0:
+        return []
+
+    article_embeddings = []
+
+    for _, row in df.iterrows():
+        embedding = model.encode(
+            row["title"],
+            show_progress_bar=False
         )
 
-        temporal_similarity[i][j] = np.exp(-days_difference / TIME_DECAY_DAYS)
+        article_embeddings.append(embedding)
 
-print("Temporal similarity calculated.")
+    article_embeddings = np.array(article_embeddings)
 
-print("\n")
-print("=" * 70)
-print("CREATING COMBINED SIMILARITY")
-print("=" * 70)
+    semantic_similarity = cosine_similarity(article_embeddings)
 
-combined_similarity = (SEMANTIC_WEIGHT * semantic_similarity + TIME_WEIGHT * temporal_similarity)
+    dates = df["published_at"].values
+    number_of_articles = len(df)
 
-print(f"Semantic weight: {SEMANTIC_WEIGHT}")
-print(f"Time weight: {TIME_WEIGHT}")
-print(f"Time decay: {TIME_DECAY_DAYS} days")
-
-combined_distance = (1 - combined_similarity)
-combined_distance = np.clip(combined_distance, 0, 1)
-
-print("\n")
-print("=" * 70)
-print("HDBSCAN CLUSTERING")
-print("=" * 70)
-
-hdbscan_model = hdbscan.HDBSCAN(
-    min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
-    min_samples=HDBSCAN_MIN_SAMPLES,
-    metric="precomputed"
-)
-
-hdbscan_labels = (
-    hdbscan_model.fit_predict(
-        combined_distance
-    )
-)
-
-num_clusters = (len(set(hdbscan_labels)) - (1 if -1 in hdbscan_labels else 0))
-
-num_noise = np.sum(
-    hdbscan_labels == -1
-)
-
-print("HDBSCAN clusters:", num_clusters)
-print("Noise articles:", num_noise)
-
-next_cluster = hdbscan_labels.max() + 1
-
-for i in range(len(hdbscan_labels)):
-    if hdbscan_labels[i] == -1:
-        hdbscan_labels[i] = next_cluster
-        next_cluster += 1
-
-df["cluster"] = (
-    hdbscan_labels
-)
-
-print("Final event clusters:", len(df["cluster"].unique()))
-
-def display_clusters(df, cluster_column, title):
-    print("\n")
-    print("=" * 70)
-    print(title)
-    print("=" * 70)
-
-    clusters = sorted(
-        df[cluster_column].unique()
+    temporal_similarity = np.zeros((
+            number_of_articles,
+            number_of_articles
+        )
     )
 
-    for cluster in clusters:
-        cluster_articles = df[
-            df[cluster_column] == cluster
+    for i in range(number_of_articles):
+        for j in range(number_of_articles):
+            days_difference = abs((dates[i] - dates[j])
+                .astype("timedelta64[D]")
+                .astype(int)
+            )
+
+            temporal_similarity[i][j] = np.exp(
+                -days_difference /
+                TIME_DECAY_DAYS
+            )
+
+    combined_similarity = (SEMANTIC_WEIGHT * semantic_similarity + TIME_WEIGHT * temporal_similarity)
+
+    combined_distance = (1 - combined_similarity)
+    combined_distance = np.clip(combined_distance, 0, 1)
+    np.fill_diagonal(combined_distance, 0)
+
+    hdbscan_model = hdbscan.HDBSCAN(
+        min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
+        min_samples=HDBSCAN_MIN_SAMPLES,
+        metric="precomputed"
+    )
+
+    hdbscan_labels = (
+        hdbscan_model.fit_predict(
+            combined_distance
+        )
+    )
+
+    next_cluster = (
+        hdbscan_labels.max() + 1
+    )
+
+    for i in range(len(hdbscan_labels)):
+        if hdbscan_labels[i] == -1:
+            hdbscan_labels[i] = next_cluster
+            next_cluster += 1
+
+    df["raw_cluster"] = hdbscan_labels
+
+    cluster_order = (
+        df.groupby("raw_cluster")["published_at"]
+        .min()
+        .sort_values()
+        .index
+        .tolist()
+    )
+
+    cluster_number_map = {
+        old_cluster: new_cluster
+        for new_cluster, old_cluster
+        in enumerate(
+            cluster_order,
+            start=1
+        )
+    }
+
+    df["cluster_number"] = (
+        df["raw_cluster"]
+        .map(cluster_number_map)
+    )
+
+    cluster_names = {}
+    for cluster_number in sorted(df["cluster_number"].unique()):
+        cluster_indices = (
+            df.index[
+                df["cluster_number"]
+                == cluster_number
+            ].tolist()
+        )
+
+        cluster_embeddings = (article_embeddings[cluster_indices])
+        centroid = np.mean(cluster_embeddings, axis=0)
+
+        centroid_similarity = cosine_similarity(
+            cluster_embeddings,
+            centroid.reshape(1, -1)
+        ).flatten()
+
+        best_position = np.argmax(centroid_similarity)
+
+        best_index = (cluster_indices[best_position])
+
+        cluster_names[
+            cluster_number
+        ] = df.loc[
+            best_index,
+            "title"
         ]
 
-        print(f"\nCLUSTER {cluster}")
-        print("-" * 50)
+    df["cluster_name"] = (
+        df["cluster_number"]
+        .map(cluster_names)
+    )
 
-        for _, article in (cluster_articles.iterrows()):
-            print("Date:", article["date"].date())
-            print("Source:", article["source"])
-            print("Text:", article["clean_text"][:250])
-            print()
+    results = []
 
+    for i, article in df.iterrows():
+        results.append({
+            "title": article["title"],
+            "cluster_number": int(
+                article["cluster_number"]
+            ),
+            "cluster_name": article[
+                "cluster_name"
+            ]
+        })
+        print("Title: ", results[i]["title"])
+        print("Cluster Number: ", results[i]["cluster_number"])
+        print("Cluster Name: ", results[i]["cluster_name"])
 
-display_clusters(
-    df,
-    "cluster",
-    "FINAL EVENT CLUSTERS"
-)
+    return results
 
-print("\n")
-print("Clustering completed")
+articles = get_articles()
+print("Articles fetched: ", len(articles))
+
+results = cluster_articles(articles)
