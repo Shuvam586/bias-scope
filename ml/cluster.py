@@ -55,7 +55,7 @@ def clean_text(text):
     return text.strip()
 
 
-def cluster_articles(articles: list[Article]):
+def cluster_articles(articles: list[Article]) -> dict:
     if not articles:
         return {
             "articles": [],
@@ -94,7 +94,8 @@ def cluster_articles(articles: list[Article]):
 
     df["published_at"] = pd.to_datetime(
         df["published_at"],
-        errors="coerce"
+        errors="coerce",
+        utc=True
     )
 
     df = df.dropna(
@@ -191,7 +192,6 @@ def cluster_articles(articles: list[Article]):
         )
     )
 
-    # Treat noise articles as individual clusters
     next_cluster = (
         hdbscan_labels.max() + 1
     )
@@ -225,8 +225,6 @@ def cluster_articles(articles: list[Article]):
         .map(cluster_number_map)
     )
 
-    # Find the article closest to the centroid
-    # and use its title as the event title
     cluster_names = {}
 
     for cluster_number in sorted(
@@ -276,14 +274,12 @@ def cluster_articles(articles: list[Article]):
         .map(cluster_names)
     )
 
-    # Generate a UUID for every event
     event_ids = {
         cluster_number: str(uuid4())
         for cluster_number
         in df["cluster_number"].unique()
     }
 
-    # Create Event objects
     events = []
 
     for cluster_number in sorted(event_ids):
@@ -302,8 +298,6 @@ def cluster_articles(articles: list[Article]):
             )
         )
 
-    # Create Article objects with their
-    # corresponding event UUID
     processed_articles = []
 
     for _, row in df.iterrows():
@@ -317,8 +311,8 @@ def cluster_articles(articles: list[Article]):
                 id=row["id"],
                 title=row["title"],
                 url=row["url"],
-                description=row["description"],
-                author=row["author"],
+                description=None if pd.isna(row["description"]) else row["description"],
+                author=None if pd.isna(row["author"]) else row["author"],
                 published_at=row["published_at"],
                 source=row["source"],
                 cluster=event_id

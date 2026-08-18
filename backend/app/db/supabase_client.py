@@ -17,6 +17,7 @@ class Article(BaseModel):
 class Event(BaseModel):
     id: str | None
     title: str
+    summary: str | None = None
 
 load_dotenv()
 
@@ -41,6 +42,14 @@ def insert_articles(articles: list[Article]):
     if (len(queue)!=0):
         response = supabase.table("articles").insert(queue).execute()
 
-#TODO
-def insert_clusters():
+
+def insert_clusters(events: list[Event]):
+
+    allEvents = []
+
+    for index, eve in enumerate(events):
+        allEvents.append(eve.model_dump(mode="json", exclude_none=True))
+
+    response = supabase.table("events").insert(allEvents).execute()
+
     pass

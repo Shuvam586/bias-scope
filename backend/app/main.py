@@ -2,7 +2,7 @@ from datetime import datetime
 from pydantic import BaseModel, HttpUrl
 from backend.app.ingestion.rss import fetch_feed
 from backend.app.ingestion.sources import SOURCES
-from backend.app.db.supabase_client import insert_articles
+from backend.app.db.supabase_client import insert_articles, insert_clusters
 from ml.cluster import cluster_articles
 
 class Article(BaseModel):
@@ -20,18 +20,22 @@ class Event(BaseModel):
     title: str
     summary: str | None = None
 
+allArticles = []
+
 for source in SOURCES.values():
     print(source["name"])
     print()
-
-    allArticles = []
 
     for f in source["feeds"]:
         print(f)
         allArticles.extend(fetch_feed(f, source["name"]))
 
-    results = cluster_articles(allArticles)
+results = cluster_articles(allArticles)
 
-    insert_articles(results["articles"])
+insert_clusters(results["events"])
+insert_articles(results["articles"])
+# print([arti.model_dump(mode="json") for arti in results["articles"]])
+# insert_articles(allArticles)
 
-    print()
+
+print()

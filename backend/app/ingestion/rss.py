@@ -3,8 +3,6 @@ from datetime import datetime
 from pydantic import BaseModel, HttpUrl
 
 
-outlet = "ndtv"
-
 class Article(BaseModel):
     id: str | None
     title: str
@@ -31,13 +29,23 @@ def fetch_feed(outlet: str, source_name: str = "unknown") -> list[Article]:
         else:
             better_desc = og_desc
 
+        og_date = entry.get("published")
+
+        try:
+            better_date = datetime.strptime(entry.get("published"),"%a, %d %b %Y %H:%M:%S %z")
+        except:
+            try:
+                better_date = datetime.fromisoformat(entry.get("published"),"%a, %d %b %Y %H:%M:%S %z")
+            except:
+                better_date = None
+
         article = Article(
             id=None,
             title=entry.get("title"),
             url=entry.get("link"),
             description=better_desc,
             author=entry.get("author"),
-            published_at=datetime.strptime(entry.get("published"),"%a, %d %b %Y %H:%M:%S %z"),
+            published_at=better_date,
             source=source_name,
             cluster=None
         )
@@ -50,4 +58,4 @@ def fetch_feed(outlet: str, source_name: str = "unknown") -> list[Article]:
 
     return articles_list
 
-fetch_feed(outlet=outlet)
+# fetch_feed(outlet=outlet)

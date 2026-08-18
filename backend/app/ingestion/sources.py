@@ -52,13 +52,6 @@ SOURCES = {
         ]
     },
 
-    "print": {
-        "name": "The Print",
-        "feeds": [
-            "https://rss.app/feeds/Dg2qlcdCsuGZKBBs.xml"
-        ]
-    },
-
     "news18": {
         "name": "News18",
         "feeds": [
