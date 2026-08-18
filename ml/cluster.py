@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 
 from pathlib import Path
-from datetime import datetime 
+from datetime import datetime
+from uuid import uuid4
 from dotenv import load_dotenv
 from supabase import create_client
 from pydantic import BaseModel, HttpUrl
@@ -13,6 +14,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 load_dotenv()
+
 
 class Article(BaseModel):
     id: str | None
@@ -24,12 +26,12 @@ class Article(BaseModel):
     source: str
     cluster: str | None
 
+
 class Event(BaseModel):
     id: str | None
     title: str
     summary: str | None = None
-    # created_at: datetime | None = None
-    # updated_at: datetime | None = None
+
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 
@@ -41,44 +43,7 @@ TIME_WEIGHT = 0.10
 
 TIME_DECAY_DAYS = 30
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError(
-        "SUPABASE_URL and SUPABASE_KEY environment variables are required."
-    )
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 model = SentenceTransformer(MODEL_NAME)
-
-
-def get_articles():
-    articles = []
-    page_size = 1000
-    offset = 0
-
-    while True:
-        response = (
-            supabase
-            .table("articles")
-            .select("title, published_at, source")
-            .range(
-                offset,
-                offset + page_size - 1
-            )
-            .execute()
-        )
-
-        batch = response.data
-        if not batch:
-            break
-
-        articles.extend(batch)
-        if len(batch) < page_size:
-            break
-        offset += page_size
-    return articles
 
 
 def clean_text(text):
@@ -90,13 +55,19 @@ def clean_text(text):
     return text.strip()
 
 
-def cluster_articles(articles):
+def cluster_articles(articles: list[Article]):
     if not articles:
-        return []
+        return {
+            "articles": [],
+            "events": []
+        }
+
+    articles = [a.model_dump(mode="json") for a in articles]
 
     df = pd.DataFrame(articles)
 
     required_columns = [
+        "id",
         "title",
         "published_at",
         "source"
@@ -109,7 +80,10 @@ def cluster_articles(articles):
             )
 
     print("Columns perfecto!!")
-    df = df.dropna(subset=["title", "published_at"])
+
+    df = df.dropna(
+        subset=["title", "published_at"]
+    )
 
     df["title"] = (
         df["title"]
@@ -128,12 +102,20 @@ def cluster_articles(articles):
     )
 
     df = df[df["title"].str.strip() != ""]
+
     df = df.reset_index(drop=True)
-    df = df.drop_duplicates(subset=["title"])
+
+    df = df.drop_duplicates(
+        subset=["title"]
+    )
+
     df = df.reset_index(drop=True)
 
     if len(df) == 0:
-        return []
+        return {
+            "articles": [],
+            "events": []
+        }
 
     article_embeddings = []
 
@@ -145,14 +127,19 @@ def cluster_articles(articles):
 
         article_embeddings.append(embedding)
 
-    article_embeddings = np.array(article_embeddings)
+    article_embeddings = np.array(
+        article_embeddings
+    )
 
-    semantic_similarity = cosine_similarity(article_embeddings)
+    semantic_similarity = cosine_similarity(
+        article_embeddings
+    )
 
     dates = df["published_at"].values
     number_of_articles = len(df)
 
-    temporal_similarity = np.zeros((
+    temporal_similarity = np.zeros(
+        (
             number_of_articles,
             number_of_articles
         )
@@ -160,7 +147,9 @@ def cluster_articles(articles):
 
     for i in range(number_of_articles):
         for j in range(number_of_articles):
-            days_difference = abs((dates[i] - dates[j])
+
+            days_difference = abs(
+                (dates[i] - dates[j])
                 .astype("timedelta64[D]")
                 .astype(int)
             )
@@ -170,11 +159,25 @@ def cluster_articles(articles):
                 TIME_DECAY_DAYS
             )
 
-    combined_similarity = (SEMANTIC_WEIGHT * semantic_similarity + TIME_WEIGHT * temporal_similarity)
+    combined_similarity = (
+        SEMANTIC_WEIGHT * semantic_similarity
+        + TIME_WEIGHT * temporal_similarity
+    )
 
-    combined_distance = (1 - combined_similarity)
-    combined_distance = np.clip(combined_distance, 0, 1)
-    np.fill_diagonal(combined_distance, 0)
+    combined_distance = (
+        1 - combined_similarity
+    )
+
+    combined_distance = np.clip(
+        combined_distance,
+        0,
+        1
+    )
+
+    np.fill_diagonal(
+        combined_distance,
+        0
+    )
 
     hdbscan_model = hdbscan.HDBSCAN(
         min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
@@ -188,6 +191,7 @@ def cluster_articles(articles):
         )
     )
 
+    # Treat noise articles as individual clusters
     next_cluster = (
         hdbscan_labels.max() + 1
     )
@@ -221,8 +225,14 @@ def cluster_articles(articles):
         .map(cluster_number_map)
     )
 
+    # Find the article closest to the centroid
+    # and use its title as the event title
     cluster_names = {}
-    for cluster_number in sorted(df["cluster_number"].unique()):
+
+    for cluster_number in sorted(
+        df["cluster_number"].unique()
+    ):
+
         cluster_indices = (
             df.index[
                 df["cluster_number"]
@@ -230,17 +240,29 @@ def cluster_articles(articles):
             ].tolist()
         )
 
-        cluster_embeddings = (article_embeddings[cluster_indices])
-        centroid = np.mean(cluster_embeddings, axis=0)
+        cluster_embeddings = (
+            article_embeddings[
+                cluster_indices
+            ]
+        )
+
+        centroid = np.mean(
+            cluster_embeddings,
+            axis=0
+        )
 
         centroid_similarity = cosine_similarity(
             cluster_embeddings,
             centroid.reshape(1, -1)
         ).flatten()
 
-        best_position = np.argmax(centroid_similarity)
+        best_position = np.argmax(
+            centroid_similarity
+        )
 
-        best_index = (cluster_indices[best_position])
+        best_index = (
+            cluster_indices[best_position]
+        )
 
         cluster_names[
             cluster_number
@@ -254,25 +276,78 @@ def cluster_articles(articles):
         .map(cluster_names)
     )
 
-    results = []
+    # Generate a UUID for every event
+    event_ids = {
+        cluster_number: str(uuid4())
+        for cluster_number
+        in df["cluster_number"].unique()
+    }
 
-    for i, article in df.iterrows():
-        results.append({
-            "title": article["title"],
-            "cluster_number": int(
-                article["cluster_number"]
-            ),
-            "cluster_name": article[
-                "cluster_name"
-            ]
-        })
-        print("Title: ", results[i]["title"])
-        print("Cluster Number: ", results[i]["cluster_number"])
-        print("Cluster Name: ", results[i]["cluster_name"])
+    # Create Event objects
+    events = []
 
-    return results
+    for cluster_number in sorted(event_ids):
 
-articles = get_articles()
-print("Articles fetched: ", len(articles))
+        event_id = event_ids[
+            cluster_number
+        ]
 
-results = cluster_articles(articles)
+        events.append(
+            Event(
+                id=event_id,
+                title=cluster_names[
+                    cluster_number
+                ],
+                summary=None
+            )
+        )
+
+    # Create Article objects with their
+    # corresponding event UUID
+    processed_articles = []
+
+    for _, row in df.iterrows():
+
+        event_id = event_ids[
+            row["cluster_number"]
+        ]
+
+        processed_articles.append(
+            Article(
+                id=row["id"],
+                title=row["title"],
+                url=row["url"],
+                description=row["description"],
+                author=row["author"],
+                published_at=row["published_at"],
+                source=row["source"],
+                cluster=event_id
+            )
+        )
+
+        print(
+            "Title:",
+            row["title"]
+        )
+
+        print(
+            "Event ID:",
+            event_id
+        )
+
+        print(
+            "Event:",
+            row["cluster_name"]
+        )
+
+    return {
+        "articles": processed_articles,
+        "events": events
+    }
+
+
+# articles = get_articles()
+# print("Articles fetched: ", len(articles))
+
+# results = cluster_articles(articles)
+# print(results)
