@@ -1,15 +1,37 @@
+from datetime import datetime
+from pydantic import BaseModel, HttpUrl
 from backend.app.ingestion.rss import fetch_feed
 from backend.app.ingestion.sources import SOURCES
 from backend.app.db.supabase_client import insert_articles
+from ml.cluster import cluster_articles
 
-# for source in SOURCES.values():
-#     print(source["name"])
-#     print()
+class Article(BaseModel):
+    id: str | None
+    title: str
+    url: HttpUrl
+    description: str | None = None
+    author: str | None = None
+    published_at: datetime | None = None
+    source: str
+    cluster: str | None
 
-#     for f in source["feeds"]:
-#         print(f)
-#         insert_articles(fetch_feed(f, source["name"]))
+class Event(BaseModel):
+    id: str | None
+    title: str
+    summary: str | None = None
 
-#     print()
+for source in SOURCES.values():
+    print(source["name"])
+    print()
 
-insert_articles(fetch_feed("https://theprint.in/feed", "The Print"))
+    allArticles = []
+
+    for f in source["feeds"]:
+        print(f)
+        allArticles.extend(fetch_feed(f, source["name"]))
+
+    results = cluster_articles(allArticles)
+
+    insert_articles(results["articles"])
+
+    print()
