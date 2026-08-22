@@ -58,4 +58,6 @@ def fetch_feed(outlet: str, source_name: str = "unknown") -> list[Article]:
 
     return articles_list
 
-# fetch_feed(outlet=outlet)
+(fetch_feed(
+    outlet="https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml"
+))

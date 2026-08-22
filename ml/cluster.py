@@ -31,6 +31,7 @@ class Event(BaseModel):
     id: str | None
     title: str
     summary: str | None = None
+    image: str
 
 
 MODEL_NAME = "all-MiniLM-L6-v2"
@@ -294,7 +295,8 @@ def cluster_articles(articles: list[Article]) -> dict:
                 title=cluster_names[
                     cluster_number
                 ],
-                summary=None
+                summary=None,
+                image="https://picsum.photos/400/300"
             )
         )
 
@@ -333,6 +335,8 @@ def cluster_articles(articles: list[Article]) -> dict:
             "Event:",
             row["cluster_name"]
         )
+        
+        print()
 
     return {
         "articles": processed_articles,

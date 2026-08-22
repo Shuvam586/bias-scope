@@ -18,6 +18,7 @@ class Event(BaseModel):
     id: str | None
     title: str
     summary: str | None = None
+    image: str
 
 load_dotenv()
 
