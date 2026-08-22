@@ -2,10 +2,10 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 from pydantic import BaseModel, HttpUrl
+from ml.cluster import cluster_articles
 from backend.app.ingestion.rss import fetch_feed
 from backend.app.ingestion.sources import SOURCES
-from backend.app.db.supabase_client import insert_articles, insert_clusters
-from ml.cluster import cluster_articles
+from backend.app.db.supabase_client import insert_articles, insert_clusters, clear_db
 
 class Article(BaseModel):
     id: str | None
@@ -52,12 +52,7 @@ for event in events:
             print(f"fetched image for event {event.id}")
             break
 
-
+clear_db()
 
 insert_clusters(events)
 insert_articles(articles)
-# print([arti.model_dump(mode="json") for arti in results["articles"]])
-# insert_articles(allArticles)
-
-
-print()

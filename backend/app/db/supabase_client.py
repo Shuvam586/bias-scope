@@ -53,4 +53,7 @@ def insert_clusters(events: list[Event]):
 
     response = supabase.table("events").insert(allEvents).execute()
 
-    pass
+
+def clear_db():
+    supabase.table("articles").delete().gte("id", "00000000-0000-0000-0000-000000000000").execute()
+    supabase.table("events").delete().gte("id", "00000000-0000-0000-0000-000000000000").execute()
