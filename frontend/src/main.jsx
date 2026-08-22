@@ -74,12 +74,14 @@ function Header({ theme, onThemeToggle }) {
     </header>
   );
 }
-function Mosaic({ large }) {
+function Mosaic({ large, image, title }) {
   return (
     <div className={`mosaic ${large ? "large" : ""}`}>
-      {colors.map((color, i) => (
-        <div key={i} style={{ background: color }} />
-      ))}
+      {image ? (
+        <img src={image} alt={title ? `Illustration for ${title}` : "Event illustration"} />
+      ) : (
+        colors.map((color, i) => <div key={i} style={{ background: color }} />)
+      )}
     </div>
   );
 }
@@ -90,7 +92,7 @@ function EventCard({ event, featured, wide }) {
       className={`event-card ${featured ? "featured" : ""} ${wide ? "wide" : ""}`}
       to={`/event/${event.id}`}
     >
-      <Mosaic large={featured || wide} />
+      <Mosaic large={featured || wide} image={event.image} title={event.title} />
       <div className="card-content">
         <h2>{event.title || "Untitled event"}</h2>
         {(featured || wide) && (
@@ -118,7 +120,7 @@ function EventFeed({ rising = false, theme, onThemeToggle }) {
     (async () => {
       const { data, error } = await supabase
         .from("events")
-        .select("id,title,summary,created_at,articles(count)")
+        .select("id,title,summary,image,created_at,articles(count)")
         .order("created_at", { ascending: false });
       if (error) setError(error.message);
       else
